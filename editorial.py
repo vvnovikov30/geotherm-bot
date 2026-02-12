@@ -103,7 +103,7 @@ def is_fresh(item):
     return age.days <= MAX_AGE_DAYS
 
 
-def score_item(item):
+def score_item(item) -> tuple[int, list[str]]:
     """
     Вычисляет score статьи на основе её характеристик.
     
@@ -111,7 +111,7 @@ def score_item(item):
         item: Словарь с новостью (должен содержать "title" и "summary")
     
     Returns:
-        tuple: (score: int, reasons: list[str])
+        tuple[int, list[str]]: (score: int, reasons: list[str])
     """
     title = item.get("title", "")
     summary = item.get("summary", "")
@@ -140,12 +140,41 @@ def score_item(item):
     if "published erratum" in title_lower:
         add(-6, "erratum")
     
-    # Правила для pub_types
-    if "preprint" in pub_types_lower:
-        add(-5, "preprint")
+    # Правила для pub_types (проверяем в порядке приоритета)
     
-    if "review" in pub_types_lower or "review-article" in pub_types_lower:
-        add(-2, "review")
+    # Высокоприоритетные типы публикаций: большие бонусы
+    high_priority_types = [
+        "randomized controlled trial",
+        "clinical trial",
+        "systematic review",
+        "meta-analysis"
+    ]
+    for pub_type in pub_types_lower:
+        if any(priority in pub_type for priority in high_priority_types):
+            add(+8, f"high-priority: {pub_type}")
+            break  # Берем только первый найденный
+    
+    # Review (но не Systematic Review, который уже обработан выше)
+    if not any("systematic review" in pt or "meta-analysis" in pt for pt in pub_types_lower):
+        if any("review" in pt for pt in pub_types_lower):
+            add(+5, "review")
+    
+    # Негативные типы: сильный штраф
+    negative_types = [
+        "letter",
+        "comment",
+        "editorial",
+        "erratum",
+        "corrigendum"
+    ]
+    for pub_type in pub_types_lower:
+        if any(negative in pub_type for negative in negative_types):
+            add(-8, f"negative-type: {pub_type}")
+            break  # Берем только первый найденный
+    
+    # Preprint: небольшой штраф
+    if "preprint" in pub_types_lower:
+        add(-3, "preprint")
     
     # Правила для text
     if "mouse" in text or "mice" in text:

@@ -7,7 +7,7 @@ import argparse
 import requests
 from config import (
     BOT_TOKEN, CHAT_ID, POLL_SECONDS, DRY_RUN, EDITORIAL_MODE,
-    SCORE_THRESHOLD, TOPIC_MAP
+    SCORE_THRESHOLD, TOPIC_MAP, DEBUG
 )
 from storage import init_db, make_fingerprint, already_seen, mark_seen
 from rss_collector import fetch_items
@@ -67,13 +67,18 @@ def send_telegram_message(chat_id, message_thread_id, text, topic_key=None):
         return False
 
 
-def process_cycle():
+def process_cycle(debug_mode=None):
     """
     Выполняет один цикл обработки: сбор → фильтр → форматирование → отправка.
+    
+    Args:
+        debug_mode: Если True, печатать score breakdown для каждого item
     
     Returns:
         int: Количество обработанных новых новостей
     """
+    if debug_mode is None:
+        debug_mode = DEBUG
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Проверка новых новостей...")
     
     # Получаем новости из RSS-лент
@@ -109,6 +114,13 @@ def process_cycle():
                 if not is_relevant(item):
                     if DRY_RUN:
                         print(f"⊘ EXCLUDED: {item['title'][:60]}...")
+                    # Debug: все равно показываем score для отфильтрованных items
+                    if debug_mode:
+                        score, reasons = score_item(item)
+                        print(f"\n[DEBUG] Score breakdown для: {item['title'][:60]}...")
+                        print(f"  Score: {score}")
+                        print(f"  Reasons: {', '.join(reasons) if reasons else 'none'}")
+                        print(f"  Status: ⊘ EXCLUDED (не релевантно)")
                     filtered_count += 1
                     continue
                 
@@ -116,15 +128,30 @@ def process_cycle():
                 if not is_fresh(item):
                     if DRY_RUN:
                         print(f"⊘ NOT_FRESH: {item['title'][:60]}...")
+                    # Debug: все равно показываем score для отфильтрованных items
+                    if debug_mode:
+                        score, reasons = score_item(item)
+                        print(f"\n[DEBUG] Score breakdown для: {item['title'][:60]}...")
+                        print(f"  Score: {score}")
+                        print(f"  Reasons: {', '.join(reasons) if reasons else 'none'}")
+                        print(f"  Status: ⊘ NOT_FRESH (не свежая)")
                     filtered_count += 1
                     continue
                 
                 # Проверка score (на уровне цикла for item in items)
                 score, reasons = score_item(item)
+                
+                # Debug: печатаем score breakdown для каждого item
+                if debug_mode:
+                    print(f"\n[DEBUG] Score breakdown для: {item['title'][:60]}...")
+                    print(f"  Score: {score}")
+                    print(f"  Reasons: {', '.join(reasons) if reasons else 'none'}")
+                    print(f"  Threshold: {SCORE_THRESHOLD}")
+                    print(f"  Status: {'✓ PASS' if score >= SCORE_THRESHOLD else '⊘ FAIL (LOW_SCORE)'}")
+                
                 if score < SCORE_THRESHOLD:
-                    if DRY_RUN:
-                        print(f"⊘ LOW_SCORE ({score}): {item['title']}")
-                        print(f"   Reasons: {', '.join(reasons) if reasons else 'none'}")
+                    print(f"⊘ LOW_SCORE ({score}): {item['title'][:60]}...")
+                    print(f"   Reasons: {', '.join(reasons) if reasons else 'none'}")
                     filtered_count += 1
                     continue
                 
@@ -160,6 +187,9 @@ def process_cycle():
                         print(f"   Reasons: {', '.join(reasons)}")
                 else:
                     print(f"✓ Отправлено: {item['title'][:50]}...")
+                # Debug: показываем score для успешно обработанных items
+                if debug_mode and EDITORIAL_MODE:
+                    print(f"  [DEBUG] Score: {score}, Reasons: {', '.join(reasons) if reasons else 'none'}")
                 new_count += 1
             else:
                 print(f"✗ Ошибка отправки: {item['title'][:50]}...")
@@ -193,7 +223,15 @@ def main():
         action="store_true",
         help="Выполнить один цикл (сбор → фильтр → форматирование) и завершиться"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Включить debug-режим: печать score breakdown для каждого item"
+    )
     args = parser.parse_args()
+    
+    # DEBUG может быть установлен через переменную окружения или CLI аргумент
+    debug_mode = DEBUG or args.debug
     
     # Проверяем наличие обязательных параметров (только если не DRY_RUN)
     if not DRY_RUN:
@@ -212,9 +250,12 @@ def main():
     if DRY_RUN:
         print("⚠️  Режим DRY_RUN: сообщения не будут отправляться в Telegram")
     
+    if debug_mode:
+        print("🔍 Режим DEBUG: будет печататься score breakdown для каждого item")
+    
     if args.once:
         print("Режим --once: выполнение одного цикла...")
-        process_cycle()
+        process_cycle(debug_mode=debug_mode)
         print("\nЦикл завершен. Выход.")
         return
     
@@ -224,7 +265,7 @@ def main():
     # Бесконечный цикл опроса
     while True:
         try:
-            process_cycle()
+            process_cycle(debug_mode=debug_mode)
         except KeyboardInterrupt:
             print("\n\nОстановка бота...")
             break

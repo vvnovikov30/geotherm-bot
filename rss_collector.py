@@ -18,7 +18,8 @@ def fetch_items():
                 "url": str,
                 "published_at": str,
                 "source": str,
-                "summary": str
+                "summary": str,
+                "pub_types": list[str]  # Типы публикаций (для Europe PMC)
             }
     """
     all_items = []
@@ -68,13 +69,28 @@ def fetch_items():
                     journal = result.get("journalTitle") or ""
                     authors = result.get("authorString") or ""
                     
-                    # Извлекаем pubTypeList.pubType (list)
-                    pub_type_list = result.get("pubTypeList", {})
-                    pub_types = pub_type_list.get("pubType", []) if isinstance(pub_type_list, dict) else []
-                    if not isinstance(pub_types, list):
-                        pub_types = [pub_types] if pub_types else []
+                    # Извлекаем pub_types: сначала пробуем pubTypeList.pubType, затем pubType (строка)
+                    pub_types = []
+                    pub_type_list = result.get("pubTypeList")
+                    if pub_type_list and isinstance(pub_type_list, dict):
+                        # Пробуем извлечь pubType из pubTypeList
+                        pub_type_value = pub_type_list.get("pubType")
+                        if pub_type_value:
+                            if isinstance(pub_type_value, list):
+                                pub_types = pub_type_value
+                            else:
+                                pub_types = [pub_type_value]
                     
-                    # Сохраняем как список строк
+                    # Если pubTypeList отсутствует или пуст, пробуем pubType (строка) напрямую
+                    if not pub_types:
+                        pub_type = result.get("pubType")
+                        if pub_type:
+                            if isinstance(pub_type, list):
+                                pub_types = pub_type
+                            else:
+                                pub_types = [pub_type]
+                    
+                    # Приводим к list[str]
                     pub_types = [str(pt) for pt in pub_types] if pub_types else []
                     
                     # Формируем текстовое представление типов публикаций
@@ -131,12 +147,16 @@ def fetch_items():
                     # Извлекаем summary (если есть)
                     summary = entry.get("summary", "")
                     
+                    # Для обычных RSS-лент pub_types отсутствует
+                    pub_types = []
+                    
                     item = {
                         "title": title,
                         "url": url,
                         "published_at": published_at,
                         "source": source,
-                        "summary": summary
+                        "summary": summary,
+                        "pub_types": pub_types
                     }
                     
                     all_items.append(item)

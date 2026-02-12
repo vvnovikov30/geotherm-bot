@@ -23,6 +23,9 @@ DRY_RUN = os.getenv("DRY_RUN", "").lower() in ("true", "1", "yes")
 # Редакционный режим: фильтрация статей по релевантности, свежести и score
 EDITORIAL_MODE = os.getenv("EDITORIAL_MODE", "True").lower() in ("true", "1", "yes")
 
+# Режим отладки: печать score breakdown для каждого item
+DEBUG = os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
+
 # Максимальный возраст публикации в днях
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "120"))
 
