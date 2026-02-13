@@ -6,7 +6,7 @@
 def format_message(item):
     """
     Форматирует новость в текст сообщения для Telegram.
-    
+
     Args:
         item: Словарь с новостью:
             {
@@ -17,7 +17,7 @@ def format_message(item):
                 "summary": str (опционально),
                 "bucket": str (опционально, "review"/"trial"/"study")
             }
-    
+
     Returns:
         str: Отформатированный текст сообщения
     """
@@ -27,20 +27,20 @@ def format_message(item):
     published_at = item.get("published_at", "")
     summary = item.get("summary", "")
     bucket = item.get("bucket", "")
-    
+
     # Формируем сообщение
     message = f"📰 {title}\n\n"
-    
+
     # Добавляем тип статьи (Review/Trial/Study)
     if bucket:
         bucket_display = bucket.capitalize()
         message += f"Тип: {bucket_display}\n"
-    
+
     message += f"🔗 Источник: {source}\n"
-    
+
     if published_at:
         message += f"📅 Дата: {published_at}\n"
-    
+
     # Добавляем аннотацию (1-2 строки, обрезать до 300-500 символов)
     if summary:
         # Очищаем от лишних пробелов и переносов
@@ -49,8 +49,8 @@ def format_message(item):
         if len(summary_clean) > 400:
             summary_clean = summary_clean[:400].rsplit(" ", 1)[0] + "..."
         message += f"\n{summary_clean}\n"
-    
+
     if url:
         message += f"\n🔗 {url}"
-    
+
     return message

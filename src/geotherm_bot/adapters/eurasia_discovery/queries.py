@@ -1,6 +1,7 @@
 """
 Генерация запросов для поиска публикаций на сайтах Евразии.
 """
+
 from typing import List
 
 from ...domain.models import QuerySpec
@@ -9,7 +10,7 @@ from ...domain.models import QuerySpec
 def generate_queries() -> List[QuerySpec]:
     """
     Генерирует список QuerySpec для поиска публикаций.
-    
+
     Returns:
         List[QuerySpec]: Список спецификаций запросов
     """
@@ -20,7 +21,7 @@ def generate_queries() -> List[QuerySpec]:
             query="минеральная вода бальнеотерапия",
             language_hint="ru",
             tags=["mineral_water", "balneotherapy"],
-            max_results=50
+            max_results=50,
         ),
         QuerySpec(
             source="eurasia",
@@ -28,7 +29,7 @@ def generate_queries() -> List[QuerySpec]:
             query="термальная вода курортное лечение",
             language_hint="ru",
             tags=["thermal_water", "spa"],
-            max_results=50
+            max_results=50,
         ),
         QuerySpec(
             source="eurasia",
@@ -36,7 +37,7 @@ def generate_queries() -> List[QuerySpec]:
             query="гидротерапия спа терапия",
             language_hint="ru",
             tags=["hydrotherapy", "spa_therapy"],
-            max_results=50
+            max_results=50,
         ),
         QuerySpec(
             source="eurasia",
@@ -44,8 +45,8 @@ def generate_queries() -> List[QuerySpec]:
             query="бикарбонатная вода сульфатная вода",
             language_hint="ru",
             tags=["bicarbonate", "sulfate"],
-            max_results=50
+            max_results=50,
         ),
     ]
-    
+
     return queries

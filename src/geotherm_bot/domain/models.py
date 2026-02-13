@@ -1,6 +1,7 @@
 """
 Доменные модели данных.
 """
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +9,7 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class Publication:
     """Модель публикации."""
+
     id: str
     source: str
     title: str
@@ -18,7 +20,7 @@ class Publication:
     journal: Optional[str] = None
     keywords: List[str] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Дополнительные поля для совместимости и обработки
     published_at: Optional[str] = None  # Для обратной совместимости
     summary: Optional[str] = None  # Алиас для abstract
@@ -26,7 +28,7 @@ class Publication:
     bucket: Optional[str] = None  # "review", "trial", "study"
     score: Optional[int] = None
     region: Optional[str] = None  # "asia", etc.
-    
+
     def __post_init__(self):
         """Инициализация после создания объекта."""
         # Синхронизация summary и abstract
@@ -34,7 +36,7 @@ class Publication:
             self.summary = self.abstract
         elif self.abstract is None and self.summary is not None:
             self.abstract = self.summary
-        
+
         # Извлечение year из published_at если не указан
         if self.year is None and self.published_at:
             try:
@@ -49,6 +51,7 @@ class Publication:
 @dataclass
 class QuerySpec:
     """Спецификация запроса для поиска публикаций."""
+
     source: str
     name: str
     query: str
@@ -60,10 +63,11 @@ class QuerySpec:
 @dataclass
 class ScoreResult:
     """Результат скоринга публикации."""
+
     score: int
     reasons: List[str] = field(default_factory=list)
     is_high_priority: bool = False
-    
+
     def __post_init__(self):
         """Инициализация после создания объекта."""
         if self.reasons is None:
@@ -73,9 +77,10 @@ class ScoreResult:
 @dataclass
 class FilterDecision:
     """Результат фильтрации публикации."""
+
     passed: bool
     reasons: List[str] = field(default_factory=list)
-    
+
     def __post_init__(self):
         """Инициализация после создания объекта."""
         if self.reasons is None:
