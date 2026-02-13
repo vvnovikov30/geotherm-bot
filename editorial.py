@@ -2,10 +2,9 @@
 Редакционная фильтрация статей: релевантность, свежесть, score.
 """
 import re
-from datetime import datetime, timedelta
-from config import (
-    INCLUDE_TERMS, EXCLUDE_TERMS, MAX_AGE_DAYS, SCORE_THRESHOLD
-)
+from datetime import datetime
+
+from config import EXCLUDE_TERMS, INCLUDE_TERMS, MAX_AGE_DAYS
 
 
 def is_relevant(item):

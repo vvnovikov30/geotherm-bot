@@ -2,20 +2,26 @@
 Основной файл Telegram-бота.
 Осуществляет polling RSS-лент и отправку новых новостей в Telegram.
 """
-import time
 import argparse
+import time
+
 import requests
+
 from config import (
-    BOT_TOKEN, CHAT_ID, POLL_SECONDS, DRY_RUN, EDITORIAL_MODE,
-    SCORE_THRESHOLD, TOPIC_MAP, DEBUG
+    BOT_TOKEN,
+    CHAT_ID,
+    DEBUG,
+    DRY_RUN,
+    EDITORIAL_MODE,
+    POLL_SECONDS,
+    SCORE_THRESHOLD,
+    TOPIC_MAP,
 )
-from storage import init_db, make_fingerprint, already_seen, mark_seen
-from rss_collector import fetch_items
-from router import get_topic, get_topic_key
+from editorial import classify_bucket, detect_region, is_fresh, is_relevant, score_item
 from formatter import format_message
-from editorial import (
-    is_relevant, is_fresh, score_item, classify_bucket, detect_region
-)
+from router import get_topic, get_topic_key
+from rss_collector import fetch_items
+from storage import already_seen, init_db, make_fingerprint, mark_seen
 
 
 def send_telegram_message(chat_id, message_thread_id, text, topic_key=None):
@@ -38,7 +44,7 @@ def send_telegram_message(chat_id, message_thread_id, text, topic_key=None):
         if topic_key:
             print(f"Topic key: {topic_key}")
         print(f"message_thread_id: {message_thread_id}")
-        print(f"Текст сообщения:")
+        print("Текст сообщения:")
         print("-"*60)
         print(text)
         print("="*60 + "\n")
@@ -120,7 +126,7 @@ def process_cycle(debug_mode=None):
                         print(f"\n[DEBUG] Score breakdown для: {item['title'][:60]}...")
                         print(f"  Score: {score}")
                         print(f"  Reasons: {', '.join(reasons) if reasons else 'none'}")
-                        print(f"  Status: ⊘ EXCLUDED (не релевантно)")
+                        print("  Status: ⊘ EXCLUDED (не релевантно)")
                     filtered_count += 1
                     continue
                 
@@ -134,7 +140,7 @@ def process_cycle(debug_mode=None):
                         print(f"\n[DEBUG] Score breakdown для: {item['title'][:60]}...")
                         print(f"  Score: {score}")
                         print(f"  Reasons: {', '.join(reasons) if reasons else 'none'}")
-                        print(f"  Status: ⊘ NOT_FRESH (не свежая)")
+                        print("  Status: ⊘ NOT_FRESH (не свежая)")
                     filtered_count += 1
                     continue
                 

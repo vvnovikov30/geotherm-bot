@@ -2,8 +2,8 @@
 Self-check для проверки скоринга статей.
 Проверяет, что score_item работает корректно и reasons правильно формируются.
 """
-from editorial import score_item, is_relevant
 from config import SCORE_THRESHOLD
+from editorial import is_relevant, score_item
 
 
 def test_score_item():
@@ -117,7 +117,7 @@ def test_score_item():
         # Проверяем формат возвращаемого значения
         assert isinstance(score, int), f"❌ Score должен быть int, получен {type(score)}"
         assert isinstance(reasons, list), f"❌ Reasons должен быть list, получен {type(reasons)}"
-        assert all(isinstance(r, str) for r in reasons), f"❌ Все reasons должны быть str"
+        assert all(isinstance(r, str) for r in reasons), "❌ Все reasons должны быть str"
         
         # Проверяем ожидаемый score
         if "expected_min_score" in test:
@@ -149,9 +149,9 @@ def test_score_item():
         # Проверяем, что reasons не пустые для LOW_SCORE
         if score < SCORE_THRESHOLD:
             if reasons:
-                print(f"  [OK] Reasons присутствуют для LOW_SCORE")
+                print("  [OK] Reasons присутствуют для LOW_SCORE")
             else:
-                print(f"  [FAIL] Reasons отсутствуют для LOW_SCORE")
+                print("  [FAIL] Reasons отсутствуют для LOW_SCORE")
                 failed += 1
                 if "expected_min_score" in test or "expected_max_score" in test:
                     passed -= 1

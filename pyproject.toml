@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=65.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geotherm-bot"
+version = "0.5.0"
+description = "Knowledge accumulation engine for Eurasian spa and balneology research"
+authors = [{name = "Your Name"}]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

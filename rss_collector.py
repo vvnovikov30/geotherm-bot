@@ -1,9 +1,11 @@
 """
 Сбор RSS-новостей из различных источников.
 """
+from datetime import datetime
+
 import feedparser
 import requests
-from datetime import datetime
+
 from config import ALL_FEEDS
 
 

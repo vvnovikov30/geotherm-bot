@@ -47,6 +47,22 @@ py -m venv .venv
 pip install -r requirements.txt
 ```
 
+### 3.1. Installation (development mode)
+
+Install in editable mode:
+
+```powershell
+pip install -e .
+```
+
+This enables direct import:
+
+```python
+import geotherm_bot
+```
+
+No PYTHONPATH needed.
+
 ### 4. Настройка конфигурации
 
 Создайте файл `.env` на основе `.env.example`:
@@ -401,6 +417,32 @@ sudo systemctl disable geotherm-bot
 - Проверьте доступность RSS-лент в браузере
 - Убедитесь, что на сервере есть доступ к интернету
 - Проверьте формат RSS-лент (должен быть валидный XML)
+
+## Development
+
+### Install dev dependencies
+
+```bash
+pip install -r dev-requirements.txt
+```
+
+### Run tests
+
+```bash
+pytest -q
+```
+
+### Run linter
+
+```bash
+ruff check .
+```
+
+### Format imports automatically
+
+```bash
+ruff check . --fix
+```
 
 ## Лицензия
 

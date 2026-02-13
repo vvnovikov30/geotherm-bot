@@ -1,7 +1,6 @@
 """
 Форматирование сообщений для отправки в Telegram.
 """
-from datetime import datetime
 
 
 def format_message(item):

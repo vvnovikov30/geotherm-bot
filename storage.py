@@ -1,10 +1,9 @@
 """
 Работа с SQLite базой данных для дедупликации новостей.
 """
-import sqlite3
 import hashlib
 import os
-from datetime import datetime
+import sqlite3
 
 # Путь к базе данных
 DB_DIR = "db"
