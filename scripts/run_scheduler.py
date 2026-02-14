@@ -58,9 +58,9 @@ logger = logging.getLogger(__name__)
 REFRESH_EVERY_HOURS = int(os.getenv("REFRESH_EVERY_HOURS", "6"))
 
 
-def parse_run_once(value: str | None) -> bool:
+def parse_bool(value: str | None) -> bool:
     """
-    Парсит значение RUN_ONCE в булевый флаг.
+    Парсит значение в булевый флаг.
 
     True для (case-insensitive): "1", "true", "yes", "y", "on"
     False для: пусто/не задано, "0", "false", "no", "off"
@@ -71,11 +71,23 @@ def parse_run_once(value: str | None) -> bool:
     return normalized in ("1", "true", "yes", "y", "on")
 
 
+# Для обратной совместимости
+def parse_run_once(value: str | None) -> bool:
+    """Парсит значение RUN_ONCE в булевый флаг (алиас для parse_bool)."""
+    return parse_bool(value)
+
+
 RUN_ONCE_RAW = os.getenv("RUN_ONCE")
-RUN_ONCE = parse_run_once(RUN_ONCE_RAW)
+RUN_ONCE = parse_bool(RUN_ONCE_RAW)
 DB_PATH = os.getenv("DB_PATH", "db/geotherm.db")
 CHAT_ID = int(os.getenv("CHAT_ID", "1"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "120"))
+
+# Publish configuration
+PUBLISH_EVERY_HOURS = int(os.getenv("PUBLISH_EVERY_HOURS", "3"))
+ENABLE_PUBLISH = parse_bool(os.getenv("ENABLE_PUBLISH"))
+PUBLISH_DRY_RUN = parse_bool(os.getenv("PUBLISH_DRY_RUN", "1"))  # default True
+PUBLISH_MAX_ITEMS = int(os.getenv("PUBLISH_MAX_ITEMS", "1"))
 
 # Термины для фильтрации (из config.py или env)
 INCLUDE_TERMS = [
@@ -212,6 +224,120 @@ def run_refresh_job():
         current_job_running = False
 
 
+def run_publish_tick():
+    """Запускает publish tick с dry-run логированием (Phase 1)."""
+    global shutdown_requested
+
+    if shutdown_requested:
+        logger.info("Shutdown requested, skipping publish tick")
+        return
+
+    start_time = time.time()
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    try:
+        logger.info(
+            f"Starting publish tick (dry_run={PUBLISH_DRY_RUN}, "
+            f"max_items={PUBLISH_MAX_ITEMS}) at {timestamp}"
+        )
+
+        # Инициализация БД
+        topic_registry = SQLiteTopicRegistry(db_path=DB_PATH)
+        topic_registry.init()
+
+        content_queue = SQLiteContentQueue(db_path=DB_PATH)
+        content_queue.init()
+
+        # Получаем список enabled топиков
+        topics = topic_registry.list_topics(chat_id=CHAT_ID, enabled_only=True)
+
+        # Фильтруем топики с новыми элементами и сохраняем count_new ДО
+        candidates = []
+        counts_before = {}
+        for topic in topics:
+            count = content_queue.count_new(topic.id)
+            if count > 0:
+                candidates.append(topic)
+                counts_before[topic.id] = count
+
+        if not candidates:
+            logger.info("No eligible items: no topics with new items")
+            duration = time.time() - start_time
+            logger.info(f"Publish tick completed in {duration:.2f}s")
+            return
+
+        # Сортируем по fairness: NULL last_post_at первыми,
+        # затем по last_post_at ASC, затем по created_at ASC
+        epoch_utc = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        candidates.sort(
+            key=lambda t: (
+                t.last_post_at is not None,  # False (None) первыми
+                t.last_post_at or epoch_utc,  # Затем по времени
+                t.created_at,  # Затем по created_at
+            )
+        )
+
+        # Выбираем до PUBLISH_MAX_ITEMS items (не topics)
+        items_logged = 0
+        for topic in candidates:
+            if items_logged >= PUBLISH_MAX_ITEMS:
+                break
+
+            # Проверяем count_new ДО peek_best_new
+            before_count = content_queue.count_new(topic.id)
+            # Получаем лучший элемент (read-only, не меняет БД)
+            item = content_queue.peek_best_new(topic.id)
+            # Проверяем count_new ПОСЛЕ peek_best_new
+            after_count = content_queue.count_new(topic.id)
+
+            if item is None:
+                continue
+
+            # Верификация: count_new не должен измениться
+            if before_count != after_count:
+                logger.error(
+                    f"Dry-run invariant violated: count_new changed! "
+                    f"topic_id={topic.id} before={before_count} after={after_count}"
+                )
+            else:
+                logger.info(
+                    f"Dry-run verified: no DB mutation (topic_id={topic.id}, "
+                    f"count={before_count})"
+                )
+
+            items_logged += 1
+            logger.info("DRY RUN: would publish item")
+            logger.info(f"  chat_id: {topic.chat_id}")
+            logger.info(f"  thread_id: {topic.message_thread_id}")
+            logger.info(f"  external_id: {item.external_id}")
+            logger.info(f"  score: {item.score}")
+            if item.title:
+                logger.info(f"  title: {item.title}")
+
+        if items_logged == 0:
+            logger.info("No eligible items: no items found in candidates")
+
+        # Smoke-проверка: count_new не должен измениться
+        smoke_passed = True
+        for topic_id, count_before in counts_before.items():
+            count_after = content_queue.count_new(topic_id)
+            if count_before != count_after:
+                smoke_passed = False
+                logger.warning(
+                    f"SMOKE CHECK FAILED: topic_id={topic_id} "
+                    f"count changed from {count_before} to {count_after}"
+                )
+        if smoke_passed:
+            logger.info("SMOKE CHECK PASSED: all topic counts unchanged")
+
+        duration = time.time() - start_time
+        logger.info(f"Publish tick completed in {duration:.2f}s")
+
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.exception(f"Publish tick failed after {duration:.2f}s: {e}")
+
+
 def signal_handler(signum, frame):
     """Обработчик сигналов для graceful shutdown."""
     global shutdown_requested, scheduler
@@ -250,6 +376,11 @@ def main():
     logger.info(f"  DB path: {DB_PATH}")
     logger.info(f"  Chat ID: {CHAT_ID}")
     logger.info(f"  Max age days: {MAX_AGE_DAYS}")
+    logger.info("Publish configuration:")
+    logger.info(f"  ENABLE_PUBLISH: {ENABLE_PUBLISH}")
+    logger.info(f"  PUBLISH_DRY_RUN: {PUBLISH_DRY_RUN}")
+    logger.info(f"  PUBLISH_EVERY_HOURS: {PUBLISH_EVERY_HOURS}")
+    logger.info(f"  PUBLISH_MAX_ITEMS: {PUBLISH_MAX_ITEMS}")
     logger.info("=" * 80)
 
     # Регистрируем обработчики сигналов
@@ -296,6 +427,24 @@ def main():
             )
 
     scheduler.add_listener(job_event_listener, EVENT_JOB_MISSED | EVENT_JOB_MAX_INSTANCES)
+
+    # Регистрируем publish job если включен
+    if ENABLE_PUBLISH:
+        publish_trigger = IntervalTrigger(hours=PUBLISH_EVERY_HOURS)
+        publish_misfire_grace_seconds = 3600  # 1 час
+        scheduler.add_job(
+            run_publish_tick,
+            trigger=publish_trigger,
+            id="publish_job",
+            name="Publish tick",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=publish_misfire_grace_seconds,
+            replace_existing=True,
+        )
+        logger.info(f"Publish job registered. Will run every {PUBLISH_EVERY_HOURS} hours.")
+    else:
+        logger.info("Publish disabled")
 
     logger.info(f"Scheduler started. Refresh will run every {REFRESH_EVERY_HOURS} hours.")
     logger.info(

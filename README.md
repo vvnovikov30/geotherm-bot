@@ -444,6 +444,117 @@ ruff check .
 ruff check . --fix
 ```
 
+## Publish Tick — Phase 1 Manual Verification (Dry Run)
+
+Phase 1 of the Publish Tick infrastructure is a read-only dry-run implementation with zero side effects. It selects candidate items from the content queue and logs them without modifying the database or sending any messages.
+
+### Environment Variables
+
+Set the following environment variables to enable and configure publish tick:
+
+```env
+ENABLE_PUBLISH=1
+PUBLISH_DRY_RUN=1
+PUBLISH_MAX_ITEMS=1
+```
+
+### Manual Verification Methods
+
+#### Method 1: Direct Function Invocation
+
+The fastest way to test publish tick without waiting for scheduler intervals:
+
+**PowerShell (Windows):**
+```powershell
+$env:ENABLE_PUBLISH="1"
+$env:PUBLISH_DRY_RUN="1"
+$env:PUBLISH_MAX_ITEMS="1"
+python -c "from scripts.run_scheduler import run_publish_tick; run_publish_tick()"
+```
+
+**Linux/macOS (bash):**
+```bash
+export ENABLE_PUBLISH=1
+export PUBLISH_DRY_RUN=1
+export PUBLISH_MAX_ITEMS=1
+python -c "from scripts.run_scheduler import run_publish_tick; run_publish_tick()"
+```
+
+#### Method 2: Scheduler with Short Interval
+
+Run the scheduler with a short publish interval for testing:
+
+**PowerShell (Windows):**
+```powershell
+$env:ENABLE_PUBLISH="1"
+$env:PUBLISH_DRY_RUN="1"
+$env:PUBLISH_EVERY_HOURS="0.01"
+$env:PUBLISH_MAX_ITEMS="1"
+python scripts/run_scheduler.py
+```
+
+**Linux/macOS (bash):**
+```bash
+export ENABLE_PUBLISH=1
+export PUBLISH_DRY_RUN=1
+export PUBLISH_EVERY_HOURS=0.01
+export PUBLISH_MAX_ITEMS=1
+python scripts/run_scheduler.py
+```
+
+Note: `PUBLISH_EVERY_HOURS=0.01` equals 36 seconds, allowing quick verification.
+
+### Expected Log Output
+
+Successful execution should produce logs matching these patterns:
+
+```
+2024-01-15 10:30:00 [INFO] Starting publish tick (dry_run=True, max_items=1) at 2024-01-15T10:30:00.123456+00:00
+2024-01-15 10:30:00 [INFO] Dry-run verified: no DB mutation (topic_id=1, count=5)
+2024-01-15 10:30:00 [INFO] DRY RUN: would publish item
+2024-01-15 10:30:00 [INFO]   chat_id: 1
+2024-01-15 10:30:00 [INFO]   thread_id: 123
+2024-01-15 10:30:00 [INFO]   external_id: abc123def456
+2024-01-15 10:30:00 [INFO]   score: 8
+2024-01-15 10:30:00 [INFO]   title: Geothermal Energy Research
+2024-01-15 10:30:00 [INFO] SMOKE CHECK PASSED: all topic counts unchanged
+2024-01-15 10:30:00 [INFO] Publish tick completed in 0.15s
+```
+
+If no eligible items are found:
+```
+2024-01-15 10:30:00 [INFO] Starting publish tick (dry_run=True, max_items=1) at 2024-01-15T10:30:00.123456+00:00
+2024-01-15 10:30:00 [INFO] No eligible items: no topics with new items
+2024-01-15 10:30:00 [INFO] Publish tick completed in 0.08s
+```
+
+### Success Criteria
+
+Verify the following conditions are met:
+
+- [ ] No exceptions or stack traces in logs
+- [ ] No database mutations (all `count_new` values unchanged)
+- [ ] Smoke check passes: "SMOKE CHECK PASSED: all topic counts unchanged"
+- [ ] Scheduler does not crash or exit unexpectedly
+- [ ] Log output includes "Starting publish tick" and "Publish tick completed"
+- [ ] If items are found, "DRY RUN: would publish item" appears with required fields
+
+### Troubleshooting
+
+**No eligible items:**
+- Ensure the database contains topics with `status='new'` items
+- Verify `CHAT_ID` matches the chat ID in your database
+- Check that topics are enabled (`enabled=1` in topics table)
+
+**Smoke check fails:**
+- This indicates a bug: `peek_best_new()` should not modify the database
+- Report the issue with full logs and database state
+
+**Scheduler crashes:**
+- Check for Python import errors
+- Verify database file exists and is accessible
+- Review exception logs for stack traces
+
 ## Лицензия
 
 Проект создан для личного использования.

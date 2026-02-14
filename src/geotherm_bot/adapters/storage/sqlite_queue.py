@@ -236,6 +236,39 @@ class SQLiteContentQueue(ContentQueue):
 
         return self._row_to_item(row)
 
+    def peek_best_new(self, topic_id: int) -> QueueItem | None:
+        """
+        Читает лучший новый элемент из очереди без изменения БД (read-only).
+
+        Аналогично pop_best_new, но явно read-only для dry-run режима.
+
+        Args:
+            topic_id: ID топика
+
+        Returns:
+            QueueItem | None: Лучший элемент или None если нет новых
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT * FROM content_queue
+                WHERE topic_id = ? AND status = 'new'
+                ORDER BY score DESC, created_at ASC
+                LIMIT 1
+            """,
+                (topic_id,),
+            )
+
+            row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_item(row)
+
     def mark_posted(self, item_id: int, posted_at: datetime) -> None:
         """
         Помечает элемент как опубликованный.
