@@ -269,6 +269,95 @@ class SQLiteContentQueue(ContentQueue):
 
         return self._row_to_item(row)
 
+    def claim_best_new(self, topic_id: int) -> QueueItem | None:
+        """
+        Атомарно захватывает лучший новый элемент из очереди.
+
+        Устанавливает статус 'posting', чтобы предотвратить
+        одновременный захват другим процессом.
+
+        Args:
+            topic_id: ID топика
+
+        Returns:
+            QueueItem | None: Захваченный элемент или None если нет доступных
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # a) Выбираем кандидата
+            cursor.execute(
+                """
+                SELECT id FROM content_queue
+                WHERE topic_id = ? AND status = 'new'
+                ORDER BY score DESC, created_at ASC
+                LIMIT 1
+            """,
+                (topic_id,),
+            )
+
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            candidate_id = row["id"]
+
+            # b) Пытаемся захватить атомарно
+            cursor.execute(
+                """
+                UPDATE content_queue
+                SET status = 'posting'
+                WHERE id = ? AND status = 'new'
+            """,
+                (candidate_id,),
+            )
+
+            # c) Проверяем, что захват успешен
+            if cursor.rowcount != 1:
+                return None
+
+            # d) Получаем полную строку для захваченного элемента
+            cursor.execute(
+                """
+                SELECT * FROM content_queue WHERE id = ?
+            """,
+                (candidate_id,),
+            )
+
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            return self._row_to_item(row)
+
+    def release_posting(self, item_id: int) -> bool:
+        """
+        Освобождает захваченный элемент, возвращая его в статус 'new'.
+
+        Используется для отката при ошибке после claim_best_new().
+
+        Args:
+            item_id: ID элемента
+
+        Returns:
+            bool: True если элемент был освобожден, False если не найден
+                или уже не в статусе 'posting'
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                UPDATE content_queue
+                SET status = 'new'
+                WHERE id = ? AND status = 'posting'
+            """,
+                (item_id,),
+            )
+
+            return cursor.rowcount == 1
+
     def mark_posted(self, item_id: int, posted_at: datetime) -> None:
         """
         Помечает элемент как опубликованный.

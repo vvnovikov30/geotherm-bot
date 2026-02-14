@@ -88,6 +88,7 @@ PUBLISH_EVERY_HOURS = int(os.getenv("PUBLISH_EVERY_HOURS", "3"))
 ENABLE_PUBLISH = parse_bool(os.getenv("ENABLE_PUBLISH"))
 PUBLISH_DRY_RUN = parse_bool(os.getenv("PUBLISH_DRY_RUN", "1"))  # default True
 PUBLISH_MAX_ITEMS = int(os.getenv("PUBLISH_MAX_ITEMS", "1"))
+ENABLE_PUBLISH_APPLY = parse_bool(os.getenv("ENABLE_PUBLISH_APPLY", "0"))
 
 # Термины для фильтрации (из config.py или env)
 INCLUDE_TERMS = [
@@ -225,7 +226,7 @@ def run_refresh_job():
 
 
 def run_publish_tick():
-    """Запускает publish tick с dry-run логированием (Phase 1)."""
+    """Запускает publish tick: dry-run (Phase 1) или apply (Phase 2)."""
     global shutdown_requested
 
     if shutdown_requested:
@@ -234,6 +235,7 @@ def run_publish_tick():
 
     start_time = time.time()
     timestamp = datetime.now(timezone.utc).isoformat()
+    now_utc = datetime.now(timezone.utc)
 
     try:
         logger.info(
@@ -277,58 +279,158 @@ def run_publish_tick():
             )
         )
 
-        # Выбираем до PUBLISH_MAX_ITEMS items (не topics)
-        items_logged = 0
-        for topic in candidates:
-            if items_logged >= PUBLISH_MAX_ITEMS:
-                break
+        if PUBLISH_DRY_RUN:
+            # Phase 1: Dry-run mode (read-only, invariants, smoke check)
+            items_logged = 0
+            for topic in candidates:
+                if items_logged >= PUBLISH_MAX_ITEMS:
+                    break
 
-            # Проверяем count_new ДО peek_best_new
-            before_count = content_queue.count_new(topic.id)
-            # Получаем лучший элемент (read-only, не меняет БД)
-            item = content_queue.peek_best_new(topic.id)
-            # Проверяем count_new ПОСЛЕ peek_best_new
-            after_count = content_queue.count_new(topic.id)
+                # Проверяем count_new ДО peek_best_new
+                before_count = content_queue.count_new(topic.id)
+                # Получаем лучший элемент (read-only, не меняет БД)
+                item = content_queue.peek_best_new(topic.id)
+                # Проверяем count_new ПОСЛЕ peek_best_new
+                after_count = content_queue.count_new(topic.id)
 
-            if item is None:
-                continue
+                if item is None:
+                    continue
 
-            # Верификация: count_new не должен измениться
-            if before_count != after_count:
-                logger.error(
-                    f"Dry-run invariant violated: count_new changed! "
-                    f"topic_id={topic.id} before={before_count} after={after_count}"
+                # Верификация: count_new не должен измениться
+                if before_count != after_count:
+                    logger.error(
+                        f"Dry-run invariant violated: count_new changed! "
+                        f"topic_id={topic.id} before={before_count} "
+                        f"after={after_count}"
+                    )
+                else:
+                    logger.info(
+                        f"Dry-run verified: no DB mutation (topic_id={topic.id}, "
+                        f"count={before_count})"
+                    )
+
+                items_logged += 1
+                logger.info("DRY RUN: would publish item")
+                logger.info(f"  chat_id: {topic.chat_id}")
+                logger.info(f"  thread_id: {topic.message_thread_id}")
+                logger.info(f"  external_id: {item.external_id}")
+                logger.info(f"  score: {item.score}")
+                if item.title:
+                    logger.info(f"  title: {item.title}")
+
+            if items_logged == 0:
+                logger.info("No eligible items: no items found in candidates")
+
+            # Smoke-проверка: count_new не должен измениться
+            smoke_passed = True
+            for topic_id, count_before in counts_before.items():
+                count_after = content_queue.count_new(topic_id)
+                if count_before != count_after:
+                    smoke_passed = False
+                    logger.warning(
+                        f"SMOKE CHECK FAILED: topic_id={topic_id} "
+                        f"count changed from {count_before} to {count_after}"
+                    )
+            if smoke_passed:
+                logger.info("SMOKE CHECK PASSED: all topic counts unchanged")
+        else:
+            # Phase 2: Apply mode (DB mutations)
+            items_posted = 0
+            for topic in candidates:
+                if items_posted >= PUBLISH_MAX_ITEMS:
+                    break
+
+                # Получаем count_new ДО claim
+                before_count = content_queue.count_new(topic.id)
+                # Атомарно захватываем лучший элемент
+                item = content_queue.claim_best_new(topic.id)
+
+                if item is None:
+                    if before_count > 0:
+                        logger.info("No claimable items (already claimed by another " "worker)")
+                    continue
+
+                if item.id is None:
+                    logger.error(
+                        f"QueueItem.id is None for topic_id={topic.id}, "
+                        f"external_id={item.external_id}"
+                    )
+                    continue
+
+                logger.info("CLAIMED item for publish (status=new->posting)")
+
+                # Логируем публикацию (без Telegram)
+                logger.info("PUBLISHED (no-telegram):")
+                logger.info(f"  chat_id: {topic.chat_id}")
+                logger.info(f"  thread_id: {topic.message_thread_id}")
+                logger.info(f"  external_id: {item.external_id}")
+                logger.info(f"  score: {item.score}")
+                if item.title:
+                    logger.info(f"  title: {item.title}")
+
+                # Применяем DB мутации
+                try:
+                    content_queue.mark_posted(item.id, posted_at=now_utc)
+                    topic_registry.touch_last_post(topic.id, now_utc)
+                except Exception as e:
+                    logger.exception(f"Failed to mark_posted or touch_last_post: {e}")
+                    # Автоматически освобождаем захват
+                    released = content_queue.release_posting(item.id)
+                    if released:
+                        logger.info(f"Released claim (posting->new) for item " f"id={item.id}")
+                    else:
+                        logger.warning(
+                            f"Failed to release claim for item id={item.id} "
+                            "(maybe already posted or missing)"
+                        )
+                    continue
+
+                # Верификация после применения
+                after_count = content_queue.count_new(topic.id)
+                if before_count - 1 != after_count:
+                    logger.warning(
+                        f"Verification: count_new decreased unexpectedly "
+                        f"topic_id={topic.id} before={before_count} "
+                        f"after={after_count} (expected {before_count - 1})"
+                    )
+                else:
+                    logger.info(
+                        f"Verified: count_new decreased correctly "
+                        f"(topic_id={topic.id} {before_count} -> {after_count})"
+                    )
+
+                # Проверяем обновление last_post_at
+                updated_topic = topic_registry.get_topic(
+                    chat_id=topic.chat_id,
+                    message_thread_id=topic.message_thread_id,
                 )
-            else:
-                logger.info(
-                    f"Dry-run verified: no DB mutation (topic_id={topic.id}, "
-                    f"count={before_count})"
-                )
+                if updated_topic is None:
+                    logger.error(
+                        f"Failed to retrieve topic after touch_last_post "
+                        f"(chat_id={topic.chat_id}, "
+                        f"thread_id={topic.message_thread_id})"
+                    )
+                elif updated_topic.last_post_at is None:
+                    logger.error(f"last_post_at not updated for topic_id={topic.id}")
+                else:
+                    # Проверяем, что время обновлено (с точностью до секунды)
+                    time_diff = abs((updated_topic.last_post_at - now_utc).total_seconds())
+                    if time_diff > 1:
+                        logger.warning(
+                            f"last_post_at time mismatch: expected ~{now_utc}, "
+                            f"got {updated_topic.last_post_at} "
+                            f"(diff={time_diff}s)"
+                        )
+                    else:
+                        logger.info(f"Verified: last_post_at updated " f"(topic_id={topic.id})")
 
-            items_logged += 1
-            logger.info("DRY RUN: would publish item")
-            logger.info(f"  chat_id: {topic.chat_id}")
-            logger.info(f"  thread_id: {topic.message_thread_id}")
-            logger.info(f"  external_id: {item.external_id}")
-            logger.info(f"  score: {item.score}")
-            if item.title:
-                logger.info(f"  title: {item.title}")
+                items_posted += 1
 
-        if items_logged == 0:
-            logger.info("No eligible items: no items found in candidates")
+            if items_posted == 0:
+                logger.info("No eligible items: no items found in candidates")
 
-        # Smoke-проверка: count_new не должен измениться
-        smoke_passed = True
-        for topic_id, count_before in counts_before.items():
-            count_after = content_queue.count_new(topic_id)
-            if count_before != count_after:
-                smoke_passed = False
-                logger.warning(
-                    f"SMOKE CHECK FAILED: topic_id={topic_id} "
-                    f"count changed from {count_before} to {count_after}"
-                )
-        if smoke_passed:
-            logger.info("SMOKE CHECK PASSED: all topic counts unchanged")
+            # Логируем итоговую статистику
+            logger.info(f"Apply summary: items_posted={items_posted}")
 
         duration = time.time() - start_time
         logger.info(f"Publish tick completed in {duration:.2f}s")
@@ -379,9 +481,15 @@ def main():
     logger.info("Publish configuration:")
     logger.info(f"  ENABLE_PUBLISH: {ENABLE_PUBLISH}")
     logger.info(f"  PUBLISH_DRY_RUN: {PUBLISH_DRY_RUN}")
+    logger.info(f"  ENABLE_PUBLISH_APPLY: {ENABLE_PUBLISH_APPLY}")
     logger.info(f"  PUBLISH_EVERY_HOURS: {PUBLISH_EVERY_HOURS}")
     logger.info(f"  PUBLISH_MAX_ITEMS: {PUBLISH_MAX_ITEMS}")
     logger.info("=" * 80)
+
+    # Валидация: если PUBLISH_DRY_RUN=False, требуется ENABLE_PUBLISH_APPLY=True
+    if not PUBLISH_DRY_RUN and not ENABLE_PUBLISH_APPLY:
+        logger.error("Refusing to run with PUBLISH_DRY_RUN=0 without " "ENABLE_PUBLISH_APPLY=1")
+        sys.exit(2)
 
     # Регистрируем обработчики сигналов
     signal.signal(signal.SIGINT, signal_handler)

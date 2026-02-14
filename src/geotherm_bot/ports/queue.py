@@ -20,7 +20,7 @@ class QueueItem:
     snippet: str | None  # для discovery: query string
     url: str | None
     score: int
-    status: str  # "new" / "posted" / "rejected"
+    status: str  # "new" / "posting" / "posted" / "rejected"
     created_at: datetime
     reasons: list[str] = field(default_factory=list)
     posted_at: datetime | None = None
